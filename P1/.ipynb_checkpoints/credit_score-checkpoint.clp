@@ -1,15 +1,14 @@
 ; credit_score.clp
-; Educational credit scoring expert system
-; Inputs use 0 to 100 percentages for payment_history_pct and utilization_pct
+; Educational credit scoring expert system (TransUnion-style factors)
 
 (deftemplate applicant
   (slot name)
-  (slot num_open_cards (type INTEGER))
-  (slot avg_card_age_years (type FLOAT))
-  (slot payment_history_pct (type FLOAT))
-  (slot utilization_pct (type FLOAT))
-  (slot derogatory_count (type INTEGER))
-  (slot hard_inquiries_24m (type INTEGER))
+  (slot total_accounts (type INTEGER))
+  (slot credit_age_years (type NUMBER))
+  (slot payment_history_pct (type NUMBER))
+  (slot credit_usage_pct (type NUMBER))
+  (slot derogatory_marks (type INTEGER))
+  (slot hard_inquiries (type INTEGER))
 )
 
 (deftemplate credit_result
@@ -18,14 +17,15 @@
   (slot grade)
 )
 
-; weights set by assistant
+; Weights tuned: payment history high, credit usage high,
+; derogatory high, credit age medium, accounts and inquiries low
 (defglobal
   ?*w_payment* = 35
-  ?*w_util*    = 30
-  ?*w_age*     = 15
-  ?*w_open*    = 8
-  ?*w_derog*   = 7
-  ?*w_inq*     = 5
+  ?*w_usage*   = 30
+  ?*w_derog*   = 20
+  ?*w_age*     = 10
+  ?*w_accts*   = 3
+  ?*w_inq*     = 2
 )
 
 (deffunction clamp (?x ?lo ?hi)
@@ -38,7 +38,7 @@
   (return (round (clamp ?pct 0 100)))
 )
 
-(deffunction score_utilization (?pct)
+(deffunction score_usage (?pct)
   (if (<= ?pct 7)   then (return 100))
   (if (<= ?pct 10)  then (return 95))
   (if (<= ?pct 20)  then (return 85))
@@ -59,7 +59,7 @@
   (return 10)
 )
 
-(deffunction score_open (?n)
+(deffunction score_accts (?n)
   (if (and (>= ?n 3) (<= ?n 6)) then (return 100))
   (if (or (and (>= ?n 1) (<= ?n 2)) (and (>= ?n 7) (<= ?n 9))) then (return 70))
   (if (= ?n 0)   then (return 30))
@@ -96,26 +96,26 @@
 (defrule compute_credit
   ?a <- (applicant
           (name ?n)
-          (num_open_cards ?noc)
-          (avg_card_age_years ?age)
+          (total_accounts ?accts)
+          (credit_age_years ?age)
           (payment_history_pct ?php)
-          (utilization_pct ?util)
-          (derogatory_count ?der)
-          (hard_inquiries_24m ?inq))
+          (credit_usage_pct ?usage)
+          (derogatory_marks ?der)
+          (hard_inquiries ?inq))
   =>
   (bind ?sp (score_payment ?php))
-  (bind ?su (score_utilization ?util))
+  (bind ?su (score_usage ?usage))
   (bind ?sa (score_age ?age))
-  (bind ?so (score_open ?noc))
+  (bind ?so (score_accts ?accts))
   (bind ?sd (score_derog ?der))
   (bind ?si (score_inq ?inq))
 
   (bind ?weighted
     (+ (* ?*w_payment* ?sp)
-       (* ?*w_util*    ?su)
-       (* ?*w_age*     ?sa)
-       (* ?*w_open*    ?so)
+       (* ?*w_usage*   ?su)
        (* ?*w_derog*   ?sd)
+       (* ?*w_age*     ?sa)
+       (* ?*w_accts*   ?so)
        (* ?*w_inq*     ?si)))
 
   (bind ?points (/ ?weighted 100.0))
@@ -123,36 +123,56 @@
   (bind ?grade (grade_of ?score))
 
   (printout t crlf)
-  (printout t "Applicant " ?n crlf)
-  (printout t "Breakdown" crlf)
-  (printout t "  payment history " ?sp " weight " ?*w_payment* crlf)
-  (printout t "  utilization " ?su " weight " ?*w_util* crlf)
-  (printout t "  average age " ?sa " weight " ?*w_age* crlf)
-  (printout t "  open cards " ?so " weight " ?*w_open* crlf)
-  (printout t "  derogatory " ?sd " weight " ?*w_derog* crlf)
-  (printout t "  inquiries " ?si " weight " ?*w_inq* crlf)
-  (printout t "Final score " ?score " grade " ?grade crlf crlf)
+  (printout t "Applicant: " ?n crlf)
+  (printout t "  Inputs:" crlf)
+  (printout t "    Payment history %: " ?php crlf)
+  (printout t "    Credit usage %:   " ?usage crlf)
+  (printout t "    Credit age:       " ?age " years" crlf)
+  (printout t "    Total accounts:   " ?accts crlf)
+  (printout t "    Derogatory marks: " ?der crlf)
+  (printout t "    Hard inquiries:   " ?inq crlf)
+  (printout t "  Score: " ?score crlf)
+  (printout t "  Grade: " ?grade crlf crlf)
 
   (assert (credit_result (name ?n) (score ?score) (grade ?grade)))
   (retract ?a)
 )
 
-; optional quick tests
+; four test applicants covering the four grade bands
 (deffacts samples
   (applicant
-    (name "Alex")
-    (num_open_cards 4)
-    (avg_card_age_years 6.2)
-    (payment_history_pct 98.5)
-    (utilization_pct 12)
-    (derogatory_count 0)
-    (hard_inquiries_24m 1))
+    (name "User 4")
+    (total_accounts 5)
+    (credit_age_years 12)
+    (payment_history_pct 99.5)
+    (credit_usage_pct 5)
+    (derogatory_marks 0)
+    (hard_inquiries 0))
+
   (applicant
-    (name "Blair")
-    (num_open_cards 2)
-    (avg_card_age_years 2.5)
-    (payment_history_pct 92)
-    (utilization_pct 48)
-    (derogatory_count 1)
-    (hard_inquiries_24m 3))
+    (name "User 3")
+    (total_accounts 4)
+    (credit_age_years 7)
+    (payment_history_pct 95.0)
+    (credit_usage_pct 18)
+    (derogatory_marks 1)
+    (hard_inquiries 1))
+
+  (applicant
+    (name "User 2")
+    (total_accounts 3)
+    (credit_age_years 4)
+    (payment_history_pct 91.0)
+    (credit_usage_pct 28)
+    (derogatory_marks 1)
+    (hard_inquiries 2))
+
+  (applicant
+    (name "User 1")
+    (total_accounts 2)
+    (credit_age_years 2)
+    (payment_history_pct 85.0)
+    (credit_usage_pct 55)
+    (derogatory_marks 2)
+    (hard_inquiries 3))
 )

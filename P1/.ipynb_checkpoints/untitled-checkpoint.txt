@@ -1,0 +1,3 @@
+(load "credit_score.clp")
+(reset)
+(run)
